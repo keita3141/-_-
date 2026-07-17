@@ -9,13 +9,28 @@
     div { margin-bottom: 15px; }
     label { display: block; margin-bottom: 5px; font-weight: bold; }
     input[type="text"], input[type="email"] { width: 100%; padding: 8px; box-sizing: border-box; }
-    button { width: 100%; padding: 10px; background-color: #06C755; color: white; border: none; border-radius: 4px; font-size: 16px; }
-    #status { margin-top: 15px; font-weight: bold; }
+    button { width: 100%; padding: 10px; background-color: #06C755; color: white; border: none; border-radius: 4px; font-size: 16px; font-weight: bold; }
+    button:disabled { background-color: #ccc; }
+    
+    /* 状態表示用エリアのスタイル */
+    #loadingArea, #registeredArea { text-align: center; padding: 20px 0; font-size: 16px; }
+    #registeredArea { color: #06C755; font-weight: bold; display: none; }
+    #registrationForm { display: none; } /* 最初はフォームを隠しておく */
+    #status { margin-top: 15px; font-weight: bold; text-align: center; }
   </style>
 </head>
 <body>
 
-  <h2>ユーザー登録フォーム</h2>
+  <h2>ユーザー登録</h2>
+  
+  <div id="loadingArea">
+    登録状態を確認しています...<br>しばらくお待ちください。
+  </div>
+
+  <div id="registeredArea">
+    <p>✓ すでにユーザー登録されています。</p>
+    <p style="font-size: 14px; color: #666; font-weight: normal;">ご利用ありがとうございます。<br>このウインドウを閉じてサービスをご利用ください。</p>
+  </div>
   
   <form id="registrationForm">
     <input type="hidden" id="lineId" name="lineId">
@@ -37,81 +52,100 @@
 
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
-    // ① あなたのLIFF IDに書き換えてください
-    const LIFF_ID = https://liff.line.me/2010743006-f1UzN8zv;
-    
-    // ② コピーしたGASのウェブアプリURLに書き換えてください
-    const GAS_URL = https://script.google.com/macros/s/AKfycbz0HMmpQBKtUl-jBGk9GmCMo1xwykQKf6w38P3OEQllXk_zVggoBn8TpR7BacBBh6MajA/exec;
+    // ① あなたのLIFF ID
+    const LIFF_ID = 2010743006-f1UzN8zv;
+    // ② GASのウェブアプリURL
+    const GAS_URL = https://script.google.com/macros/s/AKfycbzbhibmVSfJ7_R95qPymPS1AIZ-5GQwAwrQVF0eVWy4pIbwOqSy_cVzWo2PO2V-x5C-TA/exec;
 
-    const statusDiv = document.getElementById("status");
+    const loadingArea = document.getElementById("loadingArea");
+    const registeredArea = document.getElementById("registeredArea");
     const form = document.getElementById("registrationForm");
+    const statusDiv = document.getElementById("status");
 
-    // LIFFの初期化とLINE IDの取得
+    // LIFF初期化と登録検証
     async function initializeLiff() {
       try {
         await liff.init({ liffId: LIFF_ID });
         
         if (liff.isLoggedIn()) {
-          // プロフィールを取得してLINE ID（userId）をフォームにセット
           const profile = await liff.getProfile();
-          document.getElementById("lineId").value = profile.userId;
-          console.log("LINE IDの取得に成功しました: ", profile.userId);
+          const userId = profile.userId;
+          document.getElementById("lineId").value = userId;
+          
+          // --- 【新規追加】LINE IDの登録状況をGASに検証しに行く ---
+          await checkRegistrationStatus(userId);
+
         } else {
-          // LIFFブラウザ以外で開いた場合のログイン処理
           liff.login();
         }
       } catch (error) {
         console.error("LIFF初期化エラー: ", error);
+        loadingArea.style.display = "none";
         statusDiv.style.color = "red";
         statusDiv.innerText = "LINEアプリから開いてください。";
       }
     }
 
+    // スプレッドシートにLINE IDが登録済みか確認する関数
+    async function checkRegistrationStatus(lineId) {
+      try {
+        // GASのdoGetに LINE ID をパラメータとして付与し問い合わせ
+        const response = await fetch(`${GAS_URL}?lineId=${lineId}`);
+        const data = await response.json();
+
+        // ローディング表示を消す
+        loadingArea.style.display = "none";
+
+        if (data.isRegistered) {
+          // 登録済みの場合は「登録中画面」を表示する
+          registeredArea.style.display = "block";
+        } else {
+          // 未登録の場合は入力フォームを表示する
+          form.style.display = "block";
+        }
+
+      } catch (error) {
+        console.error("検証エラー: ", error);
+        loadingArea.style.display = "none";
+        // 通信エラー時などは安全のためフォームを表示するか、エラーメッセージを出す
+        statusDiv.style.color = "red";
+        statusDiv.innerText = "情報の取得に失敗しました。ページを再読み込みしてください。";
+      }
+    }
+
     // フォーム送信時の処理
     form.addEventListener("submit", async (e) => {
-      e.preventDefault(); // 画面の遷移をストップ
+      e.preventDefault();
 
       const lineId = document.getElementById("lineId").value;
       const name = document.getElementById("name").value;
       const email = document.getElementById("email").value;
 
-      // LINE IDが取得できていない場合のガード
       if (!lineId) {
         alert("LINE IDが取得できていません。少し待ってから再度お試しください。");
         return;
       }
 
-      // ボタンを無効化して二重送信を防ぐ
       const submitBtn = document.getElementById("submitBtn");
       submitBtn.disabled = true;
       submitBtn.innerText = "送信中...";
       statusDiv.innerText = "";
 
-      // 送信データの作成
-      const payload = {
-        lineId: lineId,
-        name: name,
-        email: email
-      };
+      const payload = { lineId, name, email };
 
       try {
-        // GASへPOSTリクエストを送信
-        // ※GASのWebアプリはCORSの制限があるため、mode: 'no-cors' を指定します
         await fetch(GAS_URL, {
           method: "POST",
           mode: "no-cors",
-          headers: {
-            "Content-Type": "application/json"
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
         });
 
-        // no-cors の場合、レスポンスの中身は確認できないため、リクエスト成功＝登録完了とみなします
+        // 登録完了したらフォームを消して、登録済み画面に切り替える
         form.style.display = "none";
-        statusDiv.style.color = "green";
-        statusDiv.innerText = "登録が完了しました！ウインドウを閉じます。";
+        registeredArea.innerHTML = "<p>✓ 登録が完了しました！</p><p style='font-size: 14px; color: #666;'>ウインドウを自動で閉じます...</p>";
+        registeredArea.style.display = "block";
         
-        // 3秒後にLIFFウィンドウを自動で閉じる（任意）
         setTimeout(() => {
           if (liff.isInClient()) {
             liff.closeWindow();
@@ -127,7 +161,6 @@
       }
     });
 
-    // ページ読み込み時にLIFFを初期化
     window.addEventListener("load", initializeLiff);
   </script>
 </body>
